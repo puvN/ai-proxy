@@ -47,9 +47,7 @@ public class IpAddressMatcher {
 
             if (remainingBits > 0) {
                 var mask = 0xFF << (8 - remainingBits);
-                if ((remoteBytes[fullBytes] & mask) != (requiredBytes[fullBytes] & mask)) {
-                    return false;
-                }
+                return (remoteBytes[fullBytes] & mask) == (requiredBytes[fullBytes] & mask);
             }
             return true;
         } catch (UnknownHostException e) {
