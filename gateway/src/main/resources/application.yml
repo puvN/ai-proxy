@@ -1,0 +1,49 @@
+server:
+  port: ${PORT:8085}
+
+spring:
+  application:
+    name: ai-proxy
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+logging:
+  level:
+    root: INFO
+
+app:
+
+  security:
+    enabled: true
+    allowed-ips: ${ALLOWED_IPS:}
+    admin-token: ${ADMIN_TOKEN:}
+    dynamic-ip-ttl-minutes: 720
+
+  gateway:
+    enabled: ${GATEWAY_MODE:true}
+    key-header: ${GATEWAY_KEY_HEADER:X-Gateway-Key}
+    fail-open: ${GATEWAY_FAIL_OPEN:false}
+    cache-ttl-seconds: 60
+
+  quota:
+    fail-open: ${QUOTA_FAIL_OPEN:true}
+    default-daily-limit: ${QUOTA_DAILY_LIMIT:20}
+    default-monthly-limit: ${QUOTA_MONTHLY_LIMIT:40}
+    limits-cache-ttl-seconds: 60
+    model-paths:
+      - /openai/v1/chat/completions
+      - /openai/v1/responses
+      - /anthropic/v1/messages
+      - generateContent
+
+  providers-json: '${PROVIDERS_JSON:{"gemini":{"baseUrl":"https://generativelanguage.googleapis.com"},"openai":{"baseUrl":"https://api.openai.com"},"anthropic":{"baseUrl":"https://api.anthropic.com"}}}'

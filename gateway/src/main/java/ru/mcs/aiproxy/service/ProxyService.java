@@ -10,6 +10,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import ru.mcs.aiproxy.config.AppProperties;
 import ru.mcs.aiproxy.model.ProxyRequest;
 
 import java.net.URI;
@@ -18,10 +19,12 @@ import java.net.URI;
 public class ProxyService {
     private final WebClient webClient;
     private final UrlBuilderService urlBuilderService;
+    private final AppProperties appProperties;
 
-    public ProxyService(WebClient webClient, UrlBuilderService urlBuilderService) {
+    public ProxyService(WebClient webClient, UrlBuilderService urlBuilderService, AppProperties appProperties) {
         this.webClient = webClient;
         this.urlBuilderService = urlBuilderService;
+        this.appProperties = appProperties;
     }
 
     public Mono<ServerResponse> forward(ProxyRequest request) {
@@ -65,10 +68,12 @@ public class ProxyService {
     }
 
     private void copyHeaders(HttpHeaders source, WebClient.RequestBodySpec target) {
+        String gatewayKeyHeader = appProperties.getGateway().getKeyHeader();
         source.forEach((name, values) -> {
             if (HttpHeaders.HOST.equalsIgnoreCase(name)) return;
             if (HttpHeaders.CONTENT_LENGTH.equalsIgnoreCase(name)) return;
             if (HttpHeaders.ACCEPT_ENCODING.equalsIgnoreCase(name)) return;
+            if (gatewayKeyHeader.equalsIgnoreCase(name)) return;
             values.forEach(value -> target.header(name, value));
         });
     }

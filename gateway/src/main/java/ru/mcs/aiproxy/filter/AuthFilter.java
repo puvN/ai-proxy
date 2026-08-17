@@ -34,6 +34,9 @@ public class AuthFilter implements WebFilter {
         if ("/admin/allow-ip".equals(path)) {
             return chain.filter(exchange);
         }
+        if (exchange.getAttribute(GatewayAuthFilter.GATEWAY_USER_ID_ATTR) != null) {
+            return chain.filter(exchange);
+        }
         AppProperties.Security security = appProperties.getSecurity();
 
         if (security == null || !security.isEnabled()) {
