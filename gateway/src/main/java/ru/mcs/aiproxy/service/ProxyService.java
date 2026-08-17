@@ -1,5 +1,8 @@
 package ru.mcs.aiproxy.service;
 
+import java.net.URI;
+
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -13,8 +16,7 @@ import reactor.core.publisher.Mono;
 import ru.mcs.aiproxy.config.AppProperties;
 import ru.mcs.aiproxy.model.ProxyRequest;
 
-import java.net.URI;
-
+@Slf4j
 @Service
 public class ProxyService {
     private final WebClient webClient;
@@ -28,28 +30,38 @@ public class ProxyService {
     }
 
     public Mono<ServerResponse> forward(ProxyRequest request) {
-        URI uri = urlBuilderService.build(request);
+        var uri = urlBuilderService.build(request);
+        log.debug("Forwarding {} {} to {}://{}{}", request.method(), request.path(),
+                uri.getScheme(), uri.getHost(), uri.getPath());
 
-        WebClient.RequestBodySpec requestBodySpec = webClient.method(request.method()).uri(uri);
+        var requestBodySpec = webClient.method(request.method()).uri(uri);
         copyHeaders(request.headers(), requestBodySpec);
 
-        WebClient.RequestHeadersSpec<?> clientRequest = hasBody(request.method())
+        var clientRequest = hasBody(request.method())
                 ? requestBodySpec.body(request.body(), DataBuffer.class)
                 : requestBodySpec;
 
-        Mono<ResponseEntity<Flux<DataBuffer>>> responseMono = clientRequest
+        var responseMono = clientRequest
                 .retrieve()
                 .onStatus(status -> true, errorResponse -> Mono.empty())
                 .toEntityFlux(DataBuffer.class);
 
-        return responseMono.flatMap(entity -> {
-            HttpHeaders filteredHeaders = filterHeaders(entity.getHeaders());
-            Flux<DataBuffer> body = entity.getBody() != null ? entity.getBody() : Flux.empty();
+        return responseMono
+                .doOnNext(entity -> log.info("Proxied {} {} -> {}", request.method(), request.path(), entity.getStatusCode()))
+                .flatMap(entity -> {
+                    var filteredHeaders = filterHeaders(entity.getHeaders());
+                    var body = entity.getBody() != null ? entity.getBody() : Flux.<DataBuffer>empty();
+                    log.debug("Upstream {} returned {} ({} response headers)",
+                            request.path(), entity.getStatusCode(), filteredHeaders.size());
 
-            return ServerResponse.status(entity.getStatusCode())
-                    .headers(h -> h.addAll(filteredHeaders))
-                    .body(BodyInserters.fromPublisher(body, DataBuffer.class));
-        });
+                    return ServerResponse.status(entity.getStatusCode())
+                            .headers(h -> h.addAll(filteredHeaders))
+                            .body(BodyInserters.fromPublisher(body, DataBuffer.class));
+                })
+                .onErrorResume(error -> {
+                    log.error("Upstream request {} {} failed: {}", request.method(), request.path(), error.getMessage());
+                    return Mono.error(error);
+                });
     }
 
     private boolean hasBody(HttpMethod method) {
@@ -57,7 +69,7 @@ public class ProxyService {
     }
 
     private HttpHeaders filterHeaders(HttpHeaders source) {
-        HttpHeaders filtered = new HttpHeaders();
+        var filtered = new HttpHeaders();
         source.forEach((name, values) -> {
             if (HttpHeaders.CONTENT_LENGTH.equalsIgnoreCase(name)) return;
             if (HttpHeaders.TRANSFER_ENCODING.equalsIgnoreCase(name)) return;
@@ -68,7 +80,7 @@ public class ProxyService {
     }
 
     private void copyHeaders(HttpHeaders source, WebClient.RequestBodySpec target) {
-        String gatewayKeyHeader = appProperties.getGateway().getKeyHeader();
+        var gatewayKeyHeader = appProperties.getGateway().getKeyHeader();
         source.forEach((name, values) -> {
             if (HttpHeaders.HOST.equalsIgnoreCase(name)) return;
             if (HttpHeaders.CONTENT_LENGTH.equalsIgnoreCase(name)) return;

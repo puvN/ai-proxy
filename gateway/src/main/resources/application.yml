@@ -19,7 +19,8 @@ management:
 
 logging:
   level:
-    root: INFO
+    root: ${LOG_LEVEL_ROOT:INFO}
+    ru.mcs.aiproxy: ${LOG_LEVEL_GATEWAY:DEBUG}
 
 app:
 

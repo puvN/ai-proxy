@@ -11,7 +11,7 @@ public class TtlCache<K, V> {
     }
 
     public V get(K key) {
-        Entry<V> entry = map.get(key);
+        var entry = map.get(key);
         if (entry == null) {
             return null;
         }

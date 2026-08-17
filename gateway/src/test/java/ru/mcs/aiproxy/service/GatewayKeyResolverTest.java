@@ -12,7 +12,7 @@ class GatewayKeyResolverTest {
 
     @Test
     void sha256ProducesStableHex() {
-        String hash = GatewayKeyResolver.sha256("secret");
+        var hash = GatewayKeyResolver.sha256("secret");
         assertEquals(64, hash.length());
         assertEquals(hash, GatewayKeyResolver.sha256("secret"));
         assertNotEquals(hash, GatewayKeyResolver.sha256("other"));
@@ -20,8 +20,8 @@ class GatewayKeyResolverTest {
 
     @Test
     void resolveUserIdReturnsEmptyForBlankKey() {
-        AppProperties props = new AppProperties();
-        GatewayKeyResolver resolver = new GatewayKeyResolver(null, props);
+        var props = new AppProperties();
+        var resolver = new GatewayKeyResolver(null, props);
 
         StepVerifier.create(resolver.resolveUserId("")).verifyComplete();
         StepVerifier.create(resolver.resolveUserId(null)).verifyComplete();

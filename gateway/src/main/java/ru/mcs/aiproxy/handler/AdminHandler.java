@@ -1,8 +1,6 @@
 package ru.mcs.aiproxy.handler;
 
-import java.net.InetSocketAddress;
-import java.time.Instant;
-
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.server.ServerRequest;
@@ -11,6 +9,7 @@ import reactor.core.publisher.Mono;
 import ru.mcs.aiproxy.config.AppProperties;
 import ru.mcs.aiproxy.service.IpAllowlistService;
 
+@Slf4j
 @Component
 public class AdminHandler {
     private static final String ADMIN_TOKEN_HEADER = "X-Admin-Token";
@@ -23,23 +22,27 @@ public class AdminHandler {
     }
 
     public Mono<ServerResponse> allowCurrentIp(ServerRequest request) {
-        String configuredToken = appProperties.getSecurity().getAdminToken();
+        var configuredToken = appProperties.getSecurity().getAdminToken();
         if (configuredToken == null || configuredToken.isBlank()) {
+            log.warn("Allow-ip requested but admin token is not configured");
             return ServerResponse.status(HttpStatus.SERVICE_UNAVAILABLE).bodyValue("{\"error\":\"Admin token is not configured\"}");
         }
 
-        String providedToken = request.headers().firstHeader(ADMIN_TOKEN_HEADER);
+        var providedToken = request.headers().firstHeader(ADMIN_TOKEN_HEADER);
         if (!configuredToken.equals(providedToken)) {
+            log.warn("Allow-ip rejected: invalid admin token");
             return ServerResponse.status(HttpStatus.FORBIDDEN).bodyValue("{\"error\":\"Invalid admin token\"}");
         }
 
-        InetSocketAddress remoteAddress = request.remoteAddress().orElse(null);
+        var remoteAddress = request.remoteAddress().orElse(null);
         if (remoteAddress == null || remoteAddress.getAddress() == null) {
+            log.warn("Allow-ip rejected: cannot resolve client IP");
             return ServerResponse.status(HttpStatus.BAD_REQUEST).bodyValue("{\"error\":\"Cannot resolve client IP\"}");
         }
 
-        String ip = remoteAddress.getAddress().getHostAddress();
-        Instant expiresAt = ipAllowlistService.allow(ip);
+        var ip = remoteAddress.getAddress().getHostAddress();
+        log.debug("Allow-ip request from {}", ip);
+        var expiresAt = ipAllowlistService.allow(ip);
         return ServerResponse.ok().bodyValue("{\"allowedIp\":\"" + ip + "\",\"expiresAt\":\"" + expiresAt + "\"}");
     }
 }

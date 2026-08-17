@@ -5,10 +5,12 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import ru.mcs.aiproxy.config.AppProperties;
 import ru.mcs.aiproxy.filter.IpAddressMatcher;
 
+@Slf4j
 @Service
 public class IpAllowlistService {
     private final AppProperties appProperties;
@@ -19,25 +21,32 @@ public class IpAllowlistService {
     }
 
     public boolean isAllowed(String remoteAddress) {
-        boolean staticMatch = appProperties.getSecurity().getAllowedIps().stream().anyMatch(pattern -> new IpAddressMatcher(pattern).matches(remoteAddress));
+        var staticMatch = appProperties.getSecurity().getAllowedIps().stream()
+                .anyMatch(pattern -> new IpAddressMatcher(pattern).matches(remoteAddress));
 
         if (staticMatch) {
+            log.debug("IP {} matched static allowlist", remoteAddress);
             return true;
         }
         cleanupExpired();
-        return dynamicIps.containsKey(remoteAddress);
+        var dynamic = dynamicIps.containsKey(remoteAddress);
+        log.debug("IP {} allowed by dynamic allowlist: {}", remoteAddress, dynamic);
+        return dynamic;
     }
 
     public Instant allow(String remoteAddress) {
-        long ttlMinutes = appProperties.getSecurity().getDynamicIpTtlMinutes();
-
-        Instant expiresAt = Instant.now().plus(Duration.ofMinutes(ttlMinutes));
+        var ttlMinutes = appProperties.getSecurity().getDynamicIpTtlMinutes();
+        var expiresAt = Instant.now().plus(Duration.ofMinutes(ttlMinutes));
         dynamicIps.put(remoteAddress, expiresAt);
+        log.info("IP {} added to allowlist until {}", remoteAddress, expiresAt);
         return expiresAt;
     }
 
     private void cleanupExpired() {
-        Instant now = Instant.now();
-        dynamicIps.entrySet().removeIf(entry -> entry.getValue().isBefore(now));
+        var now = Instant.now();
+        var removed = dynamicIps.entrySet().removeIf(entry -> entry.getValue().isBefore(now));
+        if (removed) {
+            log.debug("Removed expired dynamic allowlist entries");
+        }
     }
 }

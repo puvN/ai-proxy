@@ -7,15 +7,15 @@ public record ProviderPath(String provider, String path) {
             throw new IllegalArgumentException("Empty request path");
         }
 
-        String path = rawPath.trim();
+        var path = rawPath.trim();
 
         if (!path.startsWith("/")) {
             throw new IllegalArgumentException("Invalid path: " + path);
         }
 
-        String withoutFirstSlash = path.substring(1);
+        var withoutFirstSlash = path.substring(1);
 
-        int separator = withoutFirstSlash.indexOf('/');
+        var separator = withoutFirstSlash.indexOf('/');
 
         String provider;
         String providerPath;

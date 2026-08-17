@@ -9,7 +9,7 @@ public class IpAddressMatcher {
 
     public IpAddressMatcher(String ipAddress) {
         if (ipAddress.indexOf('/') > 0) {
-            String[] parts = ipAddress.split("/", 2);
+            var parts = ipAddress.split("/", 2);
 
             this.ipAddress = parts[0];
             this.prefixLength = Integer.parseInt(parts[1]);
@@ -22,8 +22,8 @@ public class IpAddressMatcher {
     public boolean matches(String remoteAddress) {
         try {
 
-            InetAddress remote = InetAddress.getByName(remoteAddress);
-            InetAddress requiredAddress = InetAddress.getByName(this.ipAddress);
+            var remote = InetAddress.getByName(remoteAddress);
+            var requiredAddress = InetAddress.getByName(this.ipAddress);
 
             if (!remote.getClass().equals(requiredAddress.getClass())) {
                 return false;
@@ -33,11 +33,11 @@ public class IpAddressMatcher {
                 return remote.equals(requiredAddress);
             }
 
-            byte[] remoteBytes = remote.getAddress();
-            byte[] requiredBytes = requiredAddress.getAddress();
+            var remoteBytes = remote.getAddress();
+            var requiredBytes = requiredAddress.getAddress();
 
-            int fullBytes = prefixLength / 8;
-            int remainingBits = prefixLength % 8;
+            var fullBytes = prefixLength / 8;
+            var remainingBits = prefixLength % 8;
 
             for (int i = 0; i < fullBytes; i++) {
                 if (remoteBytes[i] != requiredBytes[i]) {
@@ -46,7 +46,7 @@ public class IpAddressMatcher {
             }
 
             if (remainingBits > 0) {
-                int mask = 0xFF << (8 - remainingBits);
+                var mask = 0xFF << (8 - remainingBits);
                 if ((remoteBytes[fullBytes] & mask) != (requiredBytes[fullBytes] & mask)) {
                     return false;
                 }

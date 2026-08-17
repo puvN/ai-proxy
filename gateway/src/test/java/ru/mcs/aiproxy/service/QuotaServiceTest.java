@@ -35,23 +35,23 @@ class QuotaServiceTest {
 
     @Test
     void dailyTtlIsSecondsUntilMidnight() {
-        ZonedDateTime now = ZonedDateTime.of(2026, 8, 18, 12, 0, 0, 0, ZoneOffset.UTC);
+        var now = ZonedDateTime.of(2026, 8, 18, 12, 0, 0, 0, ZoneOffset.UTC);
         assertEquals(12 * 3600, QuotaService.dailyTtlSeconds(now));
     }
 
     @Test
     void monthlyTtlIsSecondsUntilFirstOfNextMonth() {
-        ZonedDateTime now = ZonedDateTime.of(2026, 8, 18, 12, 0, 0, 0, ZoneOffset.UTC);
-        ZonedDateTime nextMonth = ZonedDateTime.of(2026, 9, 1, 0, 0, 0, 0, ZoneOffset.UTC);
-        long expected = Duration.between(now, nextMonth).getSeconds();
+        var now = ZonedDateTime.of(2026, 8, 18, 12, 0, 0, 0, ZoneOffset.UTC);
+        var nextMonth = ZonedDateTime.of(2026, 9, 1, 0, 0, 0, 0, ZoneOffset.UTC);
+        var expected = Duration.between(now, nextMonth).getSeconds();
         assertEquals(expected, QuotaService.monthlyTtlSeconds(now));
     }
 
     @Test
     void isModelCallMatchesConfiguredPaths() {
-        AppProperties props = new AppProperties();
+        var props = new AppProperties();
         props.getQuota().setModelPaths(List.of("/openai/v1/chat/completions", "generateContent"));
-        QuotaService service = new QuotaService(null, props, new ObjectMapper());
+        var service = new QuotaService(null, props, new ObjectMapper());
 
         assertTrue(service.isModelCall("/openai/v1/chat/completions"));
         assertTrue(service.isModelCall("/gemini/v1beta/models/x:generateContent"));
@@ -62,15 +62,15 @@ class QuotaServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void failOpenAllowsWhenRedisDown() {
-        AppProperties props = new AppProperties();
+        var props = new AppProperties();
         props.getQuota().setFailOpen(true);
 
-        ReactiveStringRedisTemplate redis = mock(ReactiveStringRedisTemplate.class);
-        ReactiveValueOperations<String, String> valueOps = mock(ReactiveValueOperations.class);
+        var redis = mock(ReactiveStringRedisTemplate.class);
+        var valueOps = mock(ReactiveValueOperations.class);
         when(redis.opsForValue()).thenReturn(valueOps);
         when(valueOps.get(anyString())).thenReturn(Mono.error(new RuntimeException("redis down")));
 
-        QuotaService service = new QuotaService(redis, props, new ObjectMapper());
+        var service = new QuotaService(redis, props, new ObjectMapper());
 
         StepVerifier.create(service.tryConsume("user-1"))
                 .expectNextMatches(QuotaResult::allowed)

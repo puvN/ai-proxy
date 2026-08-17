@@ -1,5 +1,8 @@
 package ru.mcs.aiproxy.handler;
 
+import java.util.Map;
+
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.web.WebProperties;
 import org.springframework.boot.autoconfigure.web.reactive.error.AbstractErrorWebExceptionHandler;
 import org.springframework.boot.web.reactive.error.ErrorAttributes;
@@ -13,8 +16,7 @@ import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.server.*;
 import reactor.core.publisher.Mono;
 
-import java.util.Map;
-
+@Slf4j
 @Component
 @Order(-2)
 public class GlobalErrorHandler extends AbstractErrorWebExceptionHandler {
@@ -46,14 +48,20 @@ public class GlobalErrorHandler extends AbstractErrorWebExceptionHandler {
 
     private Mono<ServerResponse> handleError(ServerRequest request) {
 
-        Throwable error = getError(request);
+        var error = getError(request);
 
-        HttpStatus status =
+        var status =
                 (error instanceof IllegalArgumentException)
                         ? HttpStatus.NOT_FOUND
                         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-        String message = error.getMessage() != null ? error.getMessage() : "Unexpected error";
+        var message = error.getMessage() != null ? error.getMessage() : "Unexpected error";
+
+        if (status.is4xxClientError()) {
+            log.debug("Request {} rejected: {}", request.path(), message);
+        } else {
+            log.error("Unhandled error on {}: {}", request.path(), message, error);
+        }
 
         return ServerResponse
                 .status(status)

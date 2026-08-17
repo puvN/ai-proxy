@@ -1,15 +1,14 @@
 package ru.mcs.aiproxy.service;
 
 import java.time.Duration;
-import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -21,9 +20,9 @@ import ru.mcs.aiproxy.config.AppProperties;
 import ru.mcs.aiproxy.model.QuotaResult;
 import ru.mcs.aiproxy.model.UserLimits;
 
+@Slf4j
 @Service
 public class QuotaService {
-    private static final Logger log = LoggerFactory.getLogger(QuotaService.class);
     private static final String LIMITS_PREFIX = "gateway:user:";
     private static final String LIMITS_SUFFIX = ":limits";
     private static final String QUOTA_PREFIX = "quota:";
@@ -58,6 +57,7 @@ public class QuotaService {
 
     public Mono<QuotaResult> tryConsume(String userId) {
         if (userId == null || userId.isBlank()) {
+            log.debug("Empty user id, skipping quota consumption");
             return Mono.just(QuotaResult.allow(defaultDailyLimit(), defaultMonthlyLimit()));
         }
         return resolveLimits(userId)
@@ -66,20 +66,24 @@ public class QuotaService {
     }
 
     private Mono<QuotaResult> consume(String userId, UserLimits limits) {
-        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
-        String dailyKey = QUOTA_PREFIX + userId + ":daily:" + now.toLocalDate();
-        String monthlyKey = QUOTA_PREFIX + userId + ":monthly:" + YearMonth.from(now);
-        List<String> keys = List.of(dailyKey, monthlyKey);
-        List<String> args = List.of(
+        var now = ZonedDateTime.now(ZoneOffset.UTC);
+        var dailyKey = QUOTA_PREFIX + userId + ":daily:" + now.toLocalDate();
+        var monthlyKey = QUOTA_PREFIX + userId + ":monthly:" + YearMonth.from(now);
+        var keys = List.of(dailyKey, monthlyKey);
+        var args = List.of(
                 String.valueOf(dailyTtlSeconds(now)),
                 String.valueOf(monthlyTtlSeconds(now))
         );
 
+        log.debug("Consuming quota for user {}: limits daily={} monthly={}", userId, limits.daily(), limits.monthly());
+
         return redis.execute(CONSUME_SCRIPT, keys, args)
                 .map(result -> {
-                    long dailyUsed = ((Number) result.get(0)).longValue();
-                    long monthlyUsed = ((Number) result.get(1)).longValue();
-                    boolean allowed = isAllowed(dailyUsed, limits.daily(), monthlyUsed, limits.monthly());
+                    var dailyUsed = ((Number) result.get(0)).longValue();
+                    var monthlyUsed = ((Number) result.get(1)).longValue();
+                    var allowed = isAllowed(dailyUsed, limits.daily(), monthlyUsed, limits.monthly());
+                    log.debug("Quota for user {}: daily {}/{} monthly {}/{} allowed={}",
+                            userId, dailyUsed, limits.daily(), monthlyUsed, limits.monthly(), allowed);
                     return new QuotaResult(allowed, dailyUsed, limits.daily(), monthlyUsed, limits.monthly());
                 })
                 .next();
@@ -90,21 +94,29 @@ public class QuotaService {
             log.warn("Quota check failed, allowing request (fail-open): {}", error.getMessage());
             return Mono.just(QuotaResult.allow(-1, -1));
         }
+        log.error("Quota check failed (fail-closed): {}", error.getMessage(), error);
         return Mono.error(new IllegalStateException("Quota service unavailable", error));
     }
 
     private Mono<UserLimits> resolveLimits(String userId) {
-        UserLimits cached = limitsCache.get(userId);
+        var cached = limitsCache.get(userId);
         if (cached != null) {
+            log.debug("Limits cache hit for user {}: {}", userId, cached);
             return Mono.just(cached);
         }
 
-        String key = LIMITS_PREFIX + userId + LIMITS_SUFFIX;
+        var key = LIMITS_PREFIX + userId + LIMITS_SUFFIX;
+        log.debug("Limits cache miss for user {}, fetching {}", userId, key);
         return redis.opsForValue().get(key)
-                .map(this::parseLimits)
+                .map(json -> {
+                    var parsed = parseLimits(json);
+                    log.debug("Limits for user {} from redis: {}", userId, parsed);
+                    return parsed;
+                })
                 .switchIfEmpty(Mono.defer(() -> {
-                    UserLimits defaults = new UserLimits(defaultDailyLimit(), defaultMonthlyLimit());
+                    var defaults = new UserLimits(defaultDailyLimit(), defaultMonthlyLimit());
                     limitsCache.put(userId, defaults);
+                    log.debug("No limits in redis for user {}, using defaults {}", userId, defaults);
                     return Mono.just(defaults);
                 }))
                 .doOnNext(limits -> limitsCache.put(userId, limits));
@@ -112,7 +124,7 @@ public class QuotaService {
 
     private UserLimits parseLimits(String json) {
         try {
-            UserLimits limits = objectMapper.readValue(json, UserLimits.class);
+            var limits = objectMapper.readValue(json, UserLimits.class);
             return new UserLimits(
                     limits.daily() == null || limits.daily() < 0 ? null : limits.daily(),
                     limits.monthly() == null || limits.monthly() < 0 ? null : limits.monthly()
@@ -124,18 +136,18 @@ public class QuotaService {
     }
 
     public static boolean isAllowed(long dailyUsed, Long dailyLimit, long monthlyUsed, Long monthlyLimit) {
-        boolean dailyOk = dailyLimit == null || dailyLimit < 0 || dailyUsed <= dailyLimit;
-        boolean monthlyOk = monthlyLimit == null || monthlyLimit < 0 || monthlyUsed <= monthlyLimit;
+        var dailyOk = dailyLimit == null || dailyLimit < 0 || dailyUsed <= dailyLimit;
+        var monthlyOk = monthlyLimit == null || monthlyLimit < 0 || monthlyUsed <= monthlyLimit;
         return dailyOk && monthlyOk;
     }
 
     public static long dailyTtlSeconds(ZonedDateTime now) {
-        ZonedDateTime nextMidnight = now.plusDays(1).truncatedTo(java.time.temporal.ChronoUnit.DAYS);
+        var nextMidnight = now.plusDays(1).truncatedTo(ChronoUnit.DAYS);
         return Math.max(1, Duration.between(now, nextMidnight).getSeconds());
     }
 
     public static long monthlyTtlSeconds(ZonedDateTime now) {
-        ZonedDateTime firstOfNextMonth = now.withDayOfMonth(1).plusMonths(1).truncatedTo(java.time.temporal.ChronoUnit.DAYS);
+        var firstOfNextMonth = now.withDayOfMonth(1).plusMonths(1).truncatedTo(ChronoUnit.DAYS);
         return Math.max(1, Duration.between(now, firstOfNextMonth).getSeconds());
     }
 

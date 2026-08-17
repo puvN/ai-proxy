@@ -4,10 +4,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 
+@Slf4j
 @Component
 public class ProviderConfigLoader implements ApplicationRunner {
 
@@ -28,9 +30,10 @@ public class ProviderConfigLoader implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) throws Exception {
 
-        String json = appProperties.getProvidersJson();
+        var json = appProperties.getProvidersJson();
 
         if (json == null || json.isBlank()) {
+            log.debug("PROVIDERS_JSON is empty or blank, no providers configured");
             return;
         }
 
@@ -45,11 +48,11 @@ public class ProviderConfigLoader implements ApplicationRunner {
                                 )
                 );
 
-        Map<String, ProviderProperties> providers = new LinkedHashMap<>();
+        var providers = new LinkedHashMap<String, ProviderProperties>();
 
         raw.forEach((name, fields) -> {
 
-            ProviderProperties provider = new ProviderProperties();
+            var provider = new ProviderProperties();
             provider.setBaseUrl(fields.get("baseUrl"));
 
             providers.put(name, provider);
@@ -57,6 +60,9 @@ public class ProviderConfigLoader implements ApplicationRunner {
         });
 
         appProperties.setProviders(providers);
+
+        log.info("Loaded {} providers: {}", providers.size(), providers.keySet());
+        log.debug("Provider configuration: {}", raw);
 
     }
 
