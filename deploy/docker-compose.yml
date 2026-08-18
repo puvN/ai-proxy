@@ -74,6 +74,31 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
 
+  # One-shot smoke tests. Not started by default (profile "smoke").
+  # Run: docker compose --profile smoke run --rm smoke-tests
+  # Or keep the named container for log inspection:
+  #   docker compose --profile smoke up --force-recreate smoke-tests
+  # Results (results.log + results.xml) are written to ./test-results on the host.
+  smoke-tests:
+    build:
+      context: ./smoke
+    container_name: ai-proxy-smoke-tests
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      CONTROL_PLANE_URL: http://control-plane:8081
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASS: admin-pass-123
+      DAILY_LIMIT: "20"
+      RESULTS_DIR: /results
+    volumes:
+      - ./test-results:/results
+    depends_on:
+      gateway:
+        condition: service_started
+      control-plane:
+        condition: service_started
+    profiles: ["smoke"]
+
   grafana:
     image: grafana/grafana:11.1.0
     ports:
