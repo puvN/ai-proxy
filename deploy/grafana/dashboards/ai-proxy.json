@@ -36,7 +36,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_server_requests_seconds_count{job=\"gateway\",status=~\"5..\"}[1m]))",
+          "expr": "sum(rate(http_server_requests_seconds_count{job=\"gateway\",status=~\"5..\"}[1m])) or vector(0)",
           "legendFormat": "5xx/s",
           "refId": "A"
         }
