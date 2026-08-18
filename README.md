@@ -31,6 +31,7 @@ docker compose up -d --build
 | control-plane | http://localhost:8081 | web UI + REST API |
 | Prometheus | http://localhost:9090 | scrapes gateway + control-plane |
 | Grafana | http://localhost:3000 | dashboard "AI Proxy" (login `admin`/`admin`) |
+| Loki | http://localhost:3100 | log storage; Promtail ships all container logs here |
 | Postgres | localhost:5432 | database `ai_proxy`, schema `public` |
 | Redis | localhost:6379 | quota counters, gateway keys, limits |
 
@@ -187,5 +188,27 @@ curl -s http://localhost:8081/actuator/prometheus | grep http_server_requests_se
 ```
 
 Open Grafana at http://localhost:3000 (`admin`/`admin`) — the provisioned **AI Proxy** dashboard shows request rate, error rate, latency p95, quota exceeded, and invalid-key counters.
+
+## Searching application logs in Grafana (Loki)
+
+Promtail collects stdout of every container (gateway, control-plane, and infra) and stores it in Loki. To search logs in Grafana:
+
+1. Open http://localhost:3000 (`admin`/`admin`).
+2. Go to **Explore** (the compass icon) and select the **Loki** data source.
+3. Use the label browser or write LogQL queries, for example:
+
+```logql
+{service="gateway"}                        # all gateway logs
+{service="control-plane", level="ERROR"}   # errors only
+{service="gateway"} |= "Quota exceeded"    # full-text filter
+{service="gateway"} |= "Invalid gateway key"
+```
+
+Available labels: `service` (gateway, control-plane, postgres, redis, …), `container`, `level` (TRACE/DEBUG/INFO/WARN/ERROR), `project`.
+
+Notes:
+- Logs appear with a small delay — Promtail refreshes container targets every 5 seconds.
+- Loki data persists in the `loki-data` volume.
+- Logs can also be queried directly against Loki: `curl "http://localhost:3100/loki/api/v1/label/service/values"`.
 
 > Note: on Windows PowerShell `curl` is an alias for `Invoke-WebRequest` — use `curl.exe`.

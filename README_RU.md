@@ -31,6 +31,7 @@ docker compose up -d --build
 | control-plane | http://localhost:8081 | веб-интерфейс + REST API |
 | Prometheus | http://localhost:9090 | собирает метрики с gateway и control-plane |
 | Grafana | http://localhost:3000 | дашборд «AI Proxy» (логин `admin`/`admin`) |
+| Loki | http://localhost:3100 | хранилище логов; Promtail доставляет в него логи всех контейнеров |
 | Postgres | localhost:5432 | база `ai_proxy`, схема `public` |
 | Redis | localhost:6379 | счётчики квот, gateway-ключи, лимиты |
 
@@ -187,5 +188,27 @@ curl -s http://localhost:8081/actuator/prometheus | grep http_server_requests_se
 ```
 
 Открой Grafana http://localhost:3000 (`admin`/`admin`) — дашборд **AI Proxy** показывает request rate, ошибки 5xx, латентность p95, превышения квоты и счётчики невалидных ключей.
+
+## Поиск логов приложений в Grafana (Loki)
+
+Promtail собирает stdout каждого контейнера (gateway, control-plane и инфраструктуры) и складывает в Loki. Чтобы искать логи в Grafana:
+
+1. Открой http://localhost:3000 (`admin`/`admin`).
+2. Перейди в **Explore** (иконка компаса) и выбери источник данных **Loki**.
+3. Используй браузер меток или пиши LogQL-запросы, например:
+
+```logql
+{service="gateway"}                        # все логи gateway
+{service="control-plane", level="ERROR"}   # только ошибки
+{service="gateway"} |= "Quota exceeded"    # полнотекстовый фильтр
+{service="gateway"} |= "Invalid gateway key"
+```
+
+Доступные метки: `service` (gateway, control-plane, postgres, redis, …), `container`, `level` (TRACE/DEBUG/INFO/WARN/ERROR), `project`.
+
+Замечания:
+- Логи появляются с небольшой задержкой — Promtail обновляет список контейнеров каждые 5 секунд.
+- Данные Loki хранятся в volume `loki-data`.
+- Логи можно запрашивать напрямую из Loki: `curl "http://localhost:3100/loki/api/v1/label/service/values"`.
 
 > Примечание: в PowerShell на Windows `curl` — алиас на `Invoke-WebRequest`; используй `curl.exe`.
