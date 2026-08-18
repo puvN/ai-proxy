@@ -1,5 +1,6 @@
 package ru.mcs.aiproxy.service;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import ru.mcs.aiproxy.config.AppProperties;
@@ -7,12 +8,9 @@ import ru.mcs.aiproxy.config.ProviderProperties;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class ProviderService {
     private final AppProperties properties;
-
-    public ProviderService(AppProperties properties) {
-        this.properties = properties;
-    }
 
     public ProviderProperties getProvider(String provider) {
         var config = properties.getProviders().get(provider);

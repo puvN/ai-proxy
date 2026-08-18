@@ -1,23 +1,28 @@
 package ru.mcs.aiproxy.filter;
 
+import java.nio.charset.StandardCharsets;
+
+import io.micrometer.core.instrument.MeterRegistry;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
+
 import reactor.core.publisher.Mono;
 import ru.mcs.aiproxy.config.AppProperties;
 import ru.mcs.aiproxy.model.QuotaResult;
 import ru.mcs.aiproxy.service.GatewayKeyResolver;
 import ru.mcs.aiproxy.service.QuotaService;
 
-import java.nio.charset.StandardCharsets;
-
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class GatewayAuthFilter implements WebFilter, Ordered {
 
     public static final String GATEWAY_USER_ID_ATTR = "ru.mcs.aiproxy.gatewayUserId";
@@ -25,12 +30,7 @@ public class GatewayAuthFilter implements WebFilter, Ordered {
     private final AppProperties appProperties;
     private final GatewayKeyResolver gatewayKeyResolver;
     private final QuotaService quotaService;
-
-    public GatewayAuthFilter(AppProperties appProperties, GatewayKeyResolver gatewayKeyResolver, QuotaService quotaService) {
-        this.appProperties = appProperties;
-        this.gatewayKeyResolver = gatewayKeyResolver;
-        this.quotaService = quotaService;
-    }
+    private final MeterRegistry meterRegistry;
 
     @Override
     public int getOrder() {
@@ -41,7 +41,7 @@ public class GatewayAuthFilter implements WebFilter, Ordered {
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         var path = exchange.getRequest().getPath().value();
 
-        if ("/actuator/health".equals(path) || "/admin/allow-ip".equals(path)) {
+        if ("/actuator/health".equals(path) || "/actuator/prometheus".equals(path) || "/admin/allow-ip".equals(path)) {
             return chain.filter(exchange);
         }
 
@@ -63,6 +63,7 @@ public class GatewayAuthFilter implements WebFilter, Ordered {
                 .flatMap(userId -> authorizeAndForward(exchange, chain, path, userId).then(Mono.just(userId)))
                 .switchIfEmpty(Mono.defer(() -> {
                     log.info("Invalid gateway key rejected: {} {}", exchange.getRequest().getMethod(), path);
+                    meterRegistry.counter("gateway_invalid_key_total").increment();
                     return respond(exchange, HttpStatus.UNAUTHORIZED, "{\"error\":\"Invalid gateway key\"}")
                             .then(Mono.just(""));
                 }))
@@ -89,6 +90,7 @@ public class GatewayAuthFilter implements WebFilter, Ordered {
             }
             log.info("Quota exceeded for user {}: daily {}/{} monthly {}/{}",
                     userId, result.dailyUsed(), result.dailyLimit(), result.monthlyUsed(), result.monthlyLimit());
+            meterRegistry.counter("gateway_quota_exceeded_total").increment();
             return respond(exchange, HttpStatus.TOO_MANY_REQUESTS, "{\"error\":\"Quota exceeded\"}");
         });
     }

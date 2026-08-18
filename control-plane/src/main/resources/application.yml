@@ -1,0 +1,43 @@
+server:
+  port: ${PORT:8081}
+
+spring:
+  application:
+    name: control-plane
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/ai_proxy}
+    username: ${DATABASE_USER:postgres}
+    password: ${DATABASE_PASSWORD:postgres}
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  thymeleaf:
+    cache: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+
+logging:
+  level:
+    root: ${LOG_LEVEL_ROOT:INFO}
+    ru.mcs.controlplane: ${LOG_LEVEL_CONTROL_PLANE:DEBUG}
+
+app:
+  admin:
+    emails: ${ADMIN_EMAILS:}
+  subscription:
+    free-daily-limit: ${FREE_DAILY_LIMIT:20}
+    free-monthly-limit: ${FREE_MONTHLY_LIMIT:40}
+    pro-daily-limit: ${PRO_DAILY_LIMIT:-1}
+    pro-monthly-limit: ${PRO_MONTHLY_LIMIT:-1}

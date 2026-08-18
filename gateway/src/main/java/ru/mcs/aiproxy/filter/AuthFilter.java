@@ -1,5 +1,9 @@
 package ru.mcs.aiproxy.filter;
 
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -7,22 +11,17 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
+
 import reactor.core.publisher.Mono;
 import ru.mcs.aiproxy.config.AppProperties;
 import ru.mcs.aiproxy.service.IpAllowlistService;
 
-import java.nio.charset.StandardCharsets;
-
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class AuthFilter implements WebFilter {
     private final AppProperties appProperties;
     private final IpAllowlistService ipAllowlistService;
-
-    public AuthFilter(AppProperties appProperties, IpAllowlistService ipAllowlistService) {
-        this.appProperties = appProperties;
-        this.ipAllowlistService = ipAllowlistService;
-    }
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
