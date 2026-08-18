@@ -30,6 +30,9 @@ public class AuthFilter implements WebFilter {
         if ("/actuator/health".equals(path)) {
             return chain.filter(exchange);
         }
+        if ("/actuator/prometheus".equals(path)) {
+            return chain.filter(exchange);
+        }
         if ("/admin/allow-ip".equals(path)) {
             return chain.filter(exchange);
         }

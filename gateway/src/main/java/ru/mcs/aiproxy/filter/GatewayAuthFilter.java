@@ -32,6 +32,14 @@ public class GatewayAuthFilter implements WebFilter, Ordered {
     private final QuotaService quotaService;
     private final MeterRegistry meterRegistry;
 
+    private record Auth(String userId) {
+        boolean ok() {
+            return userId != null;
+        }
+    }
+
+    private static final QuotaResult QUOTA_SERVICE_FAILED = new QuotaResult(false, 0, -1L, 0, -1L);
+
     @Override
     public int getOrder() {
         return Ordered.HIGHEST_PRECEDENCE;
@@ -59,20 +67,28 @@ public class GatewayAuthFilter implements WebFilter, Ordered {
 
         log.debug("Gateway request {} {}, gateway key present", exchange.getRequest().getMethod(), path);
 
+        return resolve(exchange, key)
+                .flatMap(auth -> auth.ok()
+                        ? authorizeAndForward(exchange, chain, path, auth.userId())
+                        : Mono.empty())
+                .then();
+    }
+
+    private Mono<Auth> resolve(ServerWebExchange exchange, String key) {
         return gatewayKeyResolver.resolveUserId(key)
-                .flatMap(userId -> authorizeAndForward(exchange, chain, path, userId).then(Mono.just(userId)))
-                .switchIfEmpty(Mono.defer(() -> {
-                    log.info("Invalid gateway key rejected: {} {}", exchange.getRequest().getMethod(), path);
-                    meterRegistry.counter("gateway_invalid_key_total").increment();
-                    return respond(exchange, HttpStatus.UNAUTHORIZED, "{\"error\":\"Invalid gateway key\"}")
-                            .then(Mono.just(""));
-                }))
+                .map(Auth::new)
                 .onErrorResume(error -> {
                     log.error("Gateway auth failed: {}", error.getMessage());
                     return respond(exchange, HttpStatus.SERVICE_UNAVAILABLE, "{\"error\":\"Auth service unavailable\"}")
-                            .then(Mono.just(""));
+                            .thenReturn(new Auth(null));
                 })
-                .then();
+                .switchIfEmpty(Mono.defer(() -> {
+                    log.info("Invalid gateway key rejected: {} {}", exchange.getRequest().getMethod(),
+                            exchange.getRequest().getPath().value());
+                    meterRegistry.counter("gateway_invalid_key_total").increment();
+                    return respond(exchange, HttpStatus.UNAUTHORIZED, "{\"error\":\"Invalid gateway key\"}")
+                            .thenReturn(new Auth(null));
+                }));
     }
 
     private Mono<Void> authorizeAndForward(ServerWebExchange exchange, WebFilterChain chain, String path, String userId) {
@@ -83,16 +99,25 @@ public class GatewayAuthFilter implements WebFilter, Ordered {
             return chain.filter(exchange);
         }
 
-        return quotaService.tryConsume(userId).flatMap(result -> {
-            addRateLimitHeaders(exchange, result);
-            if (result.allowed()) {
-                return chain.filter(exchange);
-            }
-            log.info("Quota exceeded for user {}: daily {}/{} monthly {}/{}",
-                    userId, result.dailyUsed(), result.dailyLimit(), result.monthlyUsed(), result.monthlyLimit());
-            meterRegistry.counter("gateway_quota_exceeded_total").increment();
-            return respond(exchange, HttpStatus.TOO_MANY_REQUESTS, "{\"error\":\"Quota exceeded\"}");
-        });
+        return quotaService.tryConsume(userId)
+                .onErrorResume(error -> {
+                    log.error("Quota service unavailable: {}", error.getMessage());
+                    return respond(exchange, HttpStatus.SERVICE_UNAVAILABLE, "{\"error\":\"Quota service unavailable\"}")
+                            .thenReturn(QUOTA_SERVICE_FAILED);
+                })
+                .flatMap(result -> {
+                    if (result == QUOTA_SERVICE_FAILED) {
+                        return Mono.empty();
+                    }
+                    addRateLimitHeaders(exchange, result);
+                    if (result.allowed()) {
+                        return chain.filter(exchange);
+                    }
+                    log.info("Quota exceeded for user {}: daily {}/{} monthly {}/{}",
+                            userId, result.dailyUsed(), result.dailyLimit(), result.monthlyUsed(), result.monthlyLimit());
+                    meterRegistry.counter("gateway_quota_exceeded_total").increment();
+                    return respond(exchange, HttpStatus.TOO_MANY_REQUESTS, "{\"error\":\"Quota exceeded\"}");
+                });
     }
 
     private void addRateLimitHeaders(ServerWebExchange exchange, QuotaResult result) {
