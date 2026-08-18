@@ -1,2 +1,3 @@
 rootProject.name = 'ai-proxy'
 
+include 'gateway'
