@@ -32,6 +32,7 @@ docker compose up -d --build
 | Prometheus | http://localhost:9090 | собирает метрики с gateway и control-plane |
 | Grafana | http://localhost:3000 | дашборд «AI Proxy» (логин `admin`/`admin`) |
 | Loki | http://localhost:3100 | хранилище логов; Promtail доставляет в него логи всех контейнеров |
+| Tempo | http://localhost:3200 | хранилище трейсов (OTLP на 4317/4318); сюда экспортируются трейсы OTel-агентов |
 | Postgres | localhost:5432 | база `ai_proxy`, схема `public` |
 | Redis | localhost:6379 | счётчики квот, gateway-ключи, лимиты |
 
@@ -210,5 +211,42 @@ Promtail собирает stdout каждого контейнера (gateway, c
 - Логи появляются с небольшой задержкой — Promtail обновляет список контейнеров каждые 5 секунд.
 - Данные Loki хранятся в volume `loki-data`.
 - Логи можно запрашивать напрямую из Loki: `curl "http://localhost:3100/loki/api/v1/label/service/values"`.
+
+## Распределённый трейсинг (Tempo)
+
+Оба приложения запускаются с **OpenTelemetry Java agent** (подключается через `JAVA_TOOL_OPTIONS=-javaagent:...`), который автоматически инструментирует Spring WebFlux/MVC, WebClient, Lettuce и JDBC. Спаны экспортируются по OTLP в **Grafana Tempo**.
+
+Каждый запрос через **gateway** порождает один трейс с единым `trace_id`: входящий HTTP-спан, вызовы Redis и исходящий вызов к AI-провайдеру находятся в одном трейсе. Тот же `trace_id` попадает в логи приложений — логи и трейсы коррелируются.
+
+В трейсе запроса через gateway обычно следующие спаны (все под одним `trace_id`):
+- `POST /...` (server) — входящий запрос;
+- `gateway.key-resolve` — поиск gateway-ключа в Redis;
+- `gateway.quota-consume` — проверка квоты в Redis;
+- `POST` (client) — исходящий вызов к AI-провайдеру.
+
+### Просмотр трейсов
+
+1. Grafana → http://localhost:3000 (`admin`/`admin`).
+2. **Explore** → выбери источник **Tempo** и выполни TraceQL, например:
+
+```traceql
+{ service.name = "gateway" }
+{ service.name = "gateway" } && { http.route = "/openai/v1/chat/completions" }
+```
+
+Либо используй **Service graph** (Tempo → карта сервисов, работает через datasource `serviceMap`).
+
+### Корреляция логов и трейсов
+
+- В строке лога trace id в квадратных скобках: `[4a45b8b8f8adae16bd9ccaf30c4bb196]`.
+- Loki выставляет его меткой `trace_id`, поэтому логи одного трейса можно отфильтровать:
+  ```logql
+  {service="gateway", trace_id="4a45b8b8f8adae16bd9ccaf30c4bb196"}
+  ```
+- В Grafana Explore (Loki) у строки лога есть кнопка **View trace**; а в трейсе Tempo можно перейти к соответствующим логам (tracesToLogs → Loki).
+
+### Пробрасывание контекста
+
+Если клиент отправляет заголовок W3C `traceparent`, gateway продолжает этот трейс (trace id приходит от вызывающего); иначе gateway создаёт новый корневой трейс.
 
 > Примечание: в PowerShell на Windows `curl` — алиас на `Invoke-WebRequest`; используй `curl.exe`.

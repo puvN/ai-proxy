@@ -36,6 +36,8 @@ logging:
   level:
     root: ${LOG_LEVEL_ROOT:INFO}
     ru.mcs.controlplane: ${LOG_LEVEL_CONTROL_PLANE:DEBUG}
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p [%thread] [%X{trace_id:-}] %-40.40logger{39} : %m%n"
 
 app:
   admin:

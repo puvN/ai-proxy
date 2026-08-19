@@ -3,7 +3,18 @@ plugins {
     id 'io.spring.dependency-management'
 }
 
+dependencyManagement {
+    dependencies {
+        dependencySet(group: 'io.opentelemetry', version: '1.40.0') {
+            entry 'opentelemetry-api'
+            entry 'opentelemetry-context'
+        }
+    }
+}
+
 dependencies {
+    implementation project(':tracing')
+
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'

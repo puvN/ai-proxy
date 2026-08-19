@@ -25,6 +25,8 @@ logging:
   level:
     root: ${LOG_LEVEL_ROOT:INFO}
     ru.mcs.aiproxy: ${LOG_LEVEL_GATEWAY:DEBUG}
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p [%thread] [%X{trace_id:-}] %-40.40logger{39} : %m%n"
 
 app:
 

@@ -31,3 +31,7 @@ scrape_configs:
           expression: '^\S+\s+(?P<level>TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\s+'
       - labels:
           level:
+      - regex:
+          expression: '\[(?P<trace_id>[a-f0-9]{32})\]'
+      - labels:
+          trace_id:

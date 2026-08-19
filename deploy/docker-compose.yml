@@ -3,6 +3,7 @@ name: ai-proxy
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ai_proxy
       POSTGRES_USER: postgres
@@ -19,6 +20,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
     healthcheck:
@@ -31,6 +33,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+    restart: unless-stopped
     environment:
       PORT: "8080"
       REDIS_HOST: redis
@@ -38,16 +41,27 @@ services:
       GATEWAY_MODE: "true"
       LOG_LEVEL_GATEWAY: DEBUG
       PROVIDERS_JSON: '{"gemini":{"baseUrl":"https://generativelanguage.googleapis.com"},"openai":{"baseUrl":"https://api.openai.com"},"anthropic":{"baseUrl":"https://api.anthropic.com"}}'
+      JAVA_TOOL_OPTIONS: -javaagent:/app/opentelemetry-javaagent.jar
+      OTEL_SERVICE_NAME: gateway
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+      OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_LOG_ATTRIBUTES: "true"
     ports:
       - "8080:8080"
     depends_on:
       redis:
         condition: service_healthy
+      tempo:
+        condition: service_started
 
   control-plane:
     build:
       context: ..
       dockerfile: control-plane/Dockerfile
+    restart: unless-stopped
     environment:
       PORT: "8081"
       DATABASE_URL: jdbc:postgresql://postgres:5432/ai_proxy
@@ -57,6 +71,14 @@ services:
       REDIS_PORT: "6379"
       ADMIN_EMAILS: "admin@example.com"
       LOG_LEVEL_CONTROL_PLANE: DEBUG
+      JAVA_TOOL_OPTIONS: -javaagent:/app/opentelemetry-javaagent.jar
+      OTEL_SERVICE_NAME: control-plane
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+      OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_LOG_ATTRIBUTES: "true"
     ports:
       - "8081:8081"
     depends_on:
@@ -64,18 +86,38 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      tempo:
+        condition: service_started
 
   prometheus:
     image: prom/prometheus:v2.53.0
+    restart: unless-stopped
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     command:
       - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    restart: unless-stopped
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./tempo/tempo-config.yaml:/etc/tempo/config.yaml:ro
+      - tempo-data:/var/tempo
+    command:
+      - -config.file=/etc/tempo/config.yaml
+    depends_on:
+      - prometheus
 
   loki:
     image: grafana/loki:2.9.8
+    restart: unless-stopped
     ports:
       - "3100:3100"
     volumes:
@@ -86,6 +128,7 @@ services:
 
   promtail:
     image: grafana/promtail:2.9.8
+    restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
@@ -121,6 +164,7 @@ services:
 
   grafana:
     image: grafana/grafana:11.1.0
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
@@ -138,3 +182,4 @@ volumes:
   pgdata:
     name: ai-proxy-pgdata
   loki-data:
+  tempo-data:

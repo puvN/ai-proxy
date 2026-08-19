@@ -2,3 +2,4 @@ rootProject.name = 'ai-proxy'
 
 include 'gateway'
 include 'control-plane'
+include 'tracing'

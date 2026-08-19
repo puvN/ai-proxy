@@ -32,6 +32,7 @@ docker compose up -d --build
 | Prometheus | http://localhost:9090 | scrapes gateway + control-plane |
 | Grafana | http://localhost:3000 | dashboard "AI Proxy" (login `admin`/`admin`) |
 | Loki | http://localhost:3100 | log storage; Promtail ships all container logs here |
+| Tempo | http://localhost:3200 | trace storage (OTLP on 4317/4318); OTel agents export traces here |
 | Postgres | localhost:5432 | database `ai_proxy`, schema `public` |
 | Redis | localhost:6379 | quota counters, gateway keys, limits |
 
@@ -210,5 +211,42 @@ Notes:
 - Logs appear with a small delay — Promtail refreshes container targets every 5 seconds.
 - Loki data persists in the `loki-data` volume.
 - Logs can also be queried directly against Loki: `curl "http://localhost:3100/loki/api/v1/label/service/values"`.
+
+## Distributed tracing (Tempo)
+
+Both applications run with the **OpenTelemetry Java agent** (attached via `JAVA_TOOL_OPTIONS=-javaagent:...`), which auto-instruments Spring WebFlux/MVC, WebClient, Lettuce and JDBC. Spans are exported via OTLP to **Grafana Tempo**.
+
+Every request that goes through the **gateway** produces one trace with a single `trace_id`: the inbound HTTP server span, the Redis calls, and the outbound call to the AI provider are all in that same trace. The same `trace_id` is also injected into the application logs, so you can correlate logs and traces.
+
+A gateway request trace typically contains these spans (all under one `trace_id`):
+- `POST /...` (server) — the inbound request;
+- `gateway.key-resolve` — Redis lookup of the gateway key;
+- `gateway.quota-consume` — Redis quota check;
+- `POST` (client) — the outbound call to the AI provider.
+
+### Viewing traces
+
+1. Grafana → http://localhost:3000 (`admin`/`admin`).
+2. **Explore** → select the **Tempo** data source and run TraceQL, for example:
+
+```traceql
+{ service.name = "gateway" }
+{ service.name = "gateway" } && { http.route = "/openai/v1/chat/completions" }
+```
+
+Or use the **Service graph** (Tempo → Service map, backed by the `serviceMap` datasource).
+
+### Correlating logs and traces
+
+- In the log line, the trace id appears in square brackets: `[4a45b8b8f8adae16bd9ccaf30c4bb196]`.
+- Loki exposes it as the `trace_id` label, so you can query logs of one trace:
+  ```logql
+  {service="gateway", trace_id="4a45b8b8f8adae16bd9ccaf30c4bb196"}
+  ```
+- In Grafana Explore (Loki) a log line has a **View trace** shortcut; in a Tempo trace you can jump back to the corresponding logs (tracesToLogs → Loki).
+
+### Propagation
+
+If a client sends the W3C `traceparent` header, the gateway joins that trace (the trace id continues from the caller); otherwise the gateway generates a new root trace.
 
 > Note: on Windows PowerShell `curl` is an alias for `Invoke-WebRequest` — use `curl.exe`.
