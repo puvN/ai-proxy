@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import ru.mcs.aiproxy.config.AppProperties;
@@ -12,13 +13,10 @@ import ru.mcs.aiproxy.filter.IpAddressMatcher;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class IpAllowlistService {
     private final AppProperties appProperties;
     private final Map<String, Instant> dynamicIps = new ConcurrentHashMap<>();
-
-    public IpAllowlistService(AppProperties appProperties) {
-        this.appProperties = appProperties;
-    }
 
     public boolean isAllowed(String remoteAddress) {
         var staticMatch = appProperties.getSecurity().getAllowedIps().stream()

@@ -1,23 +1,185 @@
-version: "3.8"
+name: ai-proxy
 
 services:
-  ai-proxy:
-    image: malexple/ai-proxy:latest
-    container_name: ai-proxy
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ai_proxy
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     ports:
-      - "8080:8080"
-    env_file:
-      - .env
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ai_proxy"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
     environment:
       PORT: "8080"
-      PROVIDERS_JSON: >-
-        {"gemini":{"baseUrl":"https://generativelanguage.googleapis.com"},
-        "openai":{"baseUrl":"https://api.openai.com"},
-        "anthropic":{"baseUrl":"https://api.anthropic.com"}}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      GATEWAY_MODE: "true"
+      LOG_LEVEL_GATEWAY: DEBUG
+      PROVIDERS_JSON: '{"gemini":{"baseUrl":"https://generativelanguage.googleapis.com"},"openai":{"baseUrl":"https://api.openai.com"},"anthropic":{"baseUrl":"https://api.anthropic.com"}}'
+      JAVA_TOOL_OPTIONS: -javaagent:/app/opentelemetry-javaagent.jar
+      OTEL_SERVICE_NAME: gateway
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+      OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_LOG_ATTRIBUTES: "true"
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      tempo:
+        condition: service_started
+
+  control-plane:
+    build:
+      context: ..
+      dockerfile: control-plane/Dockerfile
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+    environment:
+      PORT: "8081"
+      DATABASE_URL: jdbc:postgresql://postgres:5432/ai_proxy
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: postgres
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      ADMIN_EMAILS: "admin@example.com"
+      LOG_LEVEL_CONTROL_PLANE: DEBUG
+      JAVA_TOOL_OPTIONS: -javaagent:/app/opentelemetry-javaagent.jar
+      OTEL_SERVICE_NAME: control-plane
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+      OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_LOG_ATTRIBUTES: "true"
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      tempo:
+        condition: service_started
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    restart: unless-stopped
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./tempo/tempo-config.yaml:/etc/tempo/config.yaml:ro
+      - tempo-data:/var/tempo
+    command:
+      - -config.file=/etc/tempo/config.yaml
+    depends_on:
+      - prometheus
+
+  loki:
+    image: grafana/loki:2.9.8
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    command:
+      - -config.file=/etc/loki/config.yaml
+
+  promtail:
+    image: grafana/promtail:2.9.8
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+    command:
+      - -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
+  # One-shot smoke tests. Not started by default (profile "smoke").
+  # Run: docker compose --profile smoke run --rm smoke-tests
+  # Or keep the named container for log inspection:
+  #   docker compose --profile smoke up --force-recreate smoke-tests
+  # Results (results.log + results.xml) are written to ./test-results on the host.
+  smoke-tests:
+    build:
+      context: ./smoke
+    container_name: ai-proxy-smoke-tests
+    environment:
+      GATEWAY_URL: http://gateway:8080
+      CONTROL_PLANE_URL: http://control-plane:8081
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASS: admin-pass-123
+      DAILY_LIMIT: "20"
+      RESULTS_DIR: /results
+    volumes:
+      - ./test-results:/results
+    depends_on:
+      gateway:
+        condition: service_started
+      control-plane:
+        condition: service_started
+    profiles: ["smoke"]
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  pgdata:
+    name: ai-proxy-pgdata
+  loki-data:
+  tempo-data:

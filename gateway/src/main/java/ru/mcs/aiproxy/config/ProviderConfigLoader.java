@@ -4,6 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -11,21 +12,11 @@ import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class ProviderConfigLoader implements ApplicationRunner {
 
     private final AppProperties appProperties;
-
     private final ObjectMapper objectMapper;
-
-
-    public ProviderConfigLoader(
-            AppProperties appProperties,
-            ObjectMapper objectMapper
-    ) {
-        this.appProperties = appProperties;
-        this.objectMapper = objectMapper;
-    }
-
 
     @Override
     public void run(ApplicationArguments args) throws Exception {

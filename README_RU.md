@@ -1,168 +1,252 @@
-# ai-proxy — универсальный AI Gateway
+# ai-proxy — AI Gateway as a Service
 
-Пришло время оформить это как цельный документ. Ниже — назначение, аналоги, конфиги, интеграция с OpenCode, примеры запросов и ответ по устойчивости настроек при рестарте.
+Лёгкий self-hosted AI-гейтвей из двух взаимодействующих сервисов:
 
-## Зачем нужен ai-proxy
+- **gateway** (`gateway/`, Spring Boot WebFlux, порт **8080**) — быстрый reverse-proxy к AI-провайдерам (OpenAI, Anthropic, Gemini и любым другим с HTTP REST API). Аутентифицирует клиентов по заголовку `X-Gateway-Key`, считает квоты в Redis, проксирует запросы с твоими собственными API-ключами (pass-through, ключи не хранятся) и отдаёт метрики Prometheus.
+- **control-plane** (`control-plane/`, Spring Boot MVC + Postgres, порт **8081**) — пользователи, gateway-ключи, коды доступа для подписки, аналитика использования, админ-интерфейс и REST API. Пишет ключи и лимиты в тот же Redis, откуда их читает gateway.
 
-`ai-proxy` — это лёгкий self-hosted reverse proxy, который даёт единую точку доступа к нескольким AI-провайдерам (Gemini, OpenAI, Anthropic и любым другим с HTTP REST API), решая три задачи:
+Всё поднимается локально в Docker Compose: Postgres, Redis, gateway, control-plane, Prometheus и Grafana.
 
-- **Обход сетевых ограничений** — запрос уходит с сервера в разрешённой юрисдикции/сети, а не напрямую с клиентской машины, которая может быть заблокирована корпоративным firewall или гео-ограничениями провайдера.
-- **Pass-through ключей** — proxy не хранит и не знает API-ключи; клиент передаёт их как обычно (`Authorization`, `x-api-key`, `?key=`), просто через другой домен/адрес.
-- **Гео-маршрутизация** — один и тот же Docker-образ можно поднять на серверах в разных странах, и каждый инстанс станет "региональным" через переменные окружения, без изменения кода.
+## Структура репозитория
 
-## Аналоги
-
-| Продукт                           | Тип                      | Отличие от ai-proxy                                          |
-| :-------------------------------- | :----------------------- | :----------------------------------------------------------- |
-| LiteLLM Proxy                     | Open-source, self-hosted | Полноценный enterprise AI gateway: unified OpenAI-формат для 100+ моделей, budgets, virtual keys, cost tracking, guardrails [litellm](https://github.com/BerriAI/litellm). Тяжелее и функциональнее, но сложнее в развёртывании и требует Python-стек. |
-| OpenRouter                        | SaaS (облачный)          | Единый API к 300+ моделям от 60+ провайдеров, но ключи и биллинг идут через сам OpenRouter, а не pass-through твоих собственных ключей [dibi8](https://dibi8.com/resources/llm-frameworks/openrouter-unified-llm-api-gateway/). |
-| Kong AI Gateway / Bifrost         | Enterprise self-hosted   | Полноценные API-гейтвеи с плагинами, метриками, guardrails — избыточны для личного/командного использования, целятся в корпоративный масштаб [futureagi](https://futureagi.com/blog/best-kong-ai-gateway-alternatives-2026/). |
-| Nginx/Envoy как raw reverse proxy | Инфраструктурный уровень | Может делать то же самое (проксирование по пути), но без встроенной auth-модели (allowlist IP, admin-token) и без удобной конфигурации через JSON в env — придётся писать это вручную. |
-
-**Ключевое отличие ai-proxy** — минимализм: один Java-файл-уровень логики, конфигурация целиком через переменные окружения без пересборки образа, никакого хранения ключей, никакой БД, никакого UI. Это осознанный trade-off — простота и контроль ценой отсутствия функций вроде cost tracking, budgets, guardrails, которые есть в LiteLLM.docs.litellm+1
-
-## Пример `PROVIDERS_JSON`
-
-```json
-{
-  "gemini": {
-    "baseUrl": "https://generativelanguage.googleapis.com"
-  },
-  "openai": {
-    "baseUrl": "https://api.openai.com"
-  },
-  "anthropic": {
-    "baseUrl": "https://api.anthropic.com"
-  }
-}
+```
+gateway/            # модуль прокси (WebFlux, Redis)
+control-plane/      # модуль пользователей/ключей/подписок (MVC + JPA + Postgres)
+deploy/             # docker-compose, конфиги Prometheus/Grafana, контейнерные smoke-тесты
+plans/              # план архитектуры
 ```
 
-Каждый ключ верхнего уровня (`gemini`, `openai`, `anthropic`) становится первым сегментом пути в URL твоего proxy: `/gemini/...`, `/openai/...`, `/anthropic/...`.
+## Запуск системы
 
-## Настройка в OpenCode
-
-В OpenCode задаётся только `baseURL` — ключи вводятся штатным способом (`opencode auth login` или `{env:...}`), и OpenCode сам передаёт их в заголовках как обычно, а proxy их просто форвардит без изменений.opencode+1
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "google": {
-      "options": { "baseURL": "https://ai-proxy-pog5.onrender.com/gemini/v1beta" }
-    },
-    "openai": {
-      "options": { "baseURL": "https://ai-proxy-pog5.onrender.com/openai/v1" }
-    },
-    "anthropic": {
-      "options": { "baseURL": "https://ai-proxy-pog5.onrender.com/anthropic/v1" }
-    }
-  }
-}
-```
-
-## Примеры запросов к AI через proxy
-
-**Gemini:**
-
-```bashc
-url --request POST \
-  --url 'https://ai-proxy-pog5.onrender.com/gemini/v1beta/models/gemini-2.5-flash:generateContent?key=YOUR_GEMINI_KEY' \
-  --header 'Content-Type: application/json' \
-  --data '{"contents":[{"parts":[{"text":"Explain how AI works in a few words"}]}]}'
-```
-
-**OpenAI:**
+Требования: Docker с Compose v2.
 
 ```bash
-curl --request POST \
-  --url https://ai-proxy-pog5.onrender.com/openai/v1/chat/completions \
-  --header 'Authorization: Bearer YOUR_OPENAI_KEY' \
-  --header 'Content-Type: application/json' \
-  --data '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
+cd deploy
+docker compose up -d --build
 ```
 
-**Anthropic:**
+| Сервис | Адрес | Назначение |
+|---|---|---|
+| gateway | http://localhost:8080 | прокси; `/actuator/health`, `/actuator/prometheus` |
+| control-plane | http://localhost:8081 | веб-интерфейс + REST API |
+| Prometheus | http://localhost:9090 | собирает метрики с gateway и control-plane |
+| Grafana | http://localhost:3000 | дашборд «AI Proxy» (логин `admin`/`admin`) |
+| Loki | http://localhost:3100 | хранилище логов; Promtail доставляет в него логи всех контейнеров |
+| Tempo | http://localhost:3200 | хранилище трейсов (OTLP на 4317/4318); сюда экспортируются трейсы OTel-агентов |
+| Postgres | localhost:5432 | база `ai_proxy`, схема `public` |
+| Redis | localhost:6379 | счётчики квот, gateway-ключи, лимиты |
+
+Остановить стек (данные сохраняются):
 
 ```bash
-curl --request POST \
-  --url https://ai-proxy-pog5.onrender.com/anthropic/v1/messages \
-  --header 'x-api-key: YOUR_ANTHROPIC_KEY' \
-  --header 'anthropic-version: 2023-06-01' \
-  --header 'Content-Type: application/json' \
-  --data '{"model":"claude-3-5-sonnet-20241022","max_tokens":100,"messages":[{"role":"user","content":"hi"}]}'
+docker compose down
 ```
 
-## Примеры запросов на изменение настроек на лету
+С флагом `-v` дополнительно удаляется том Postgres (`ai-proxy-pgdata`).
 
-**Разрешить текущий IP на 12 часов (динамический allowlist):**
+### Конфигурация
+
+Всё настраивается переменными окружения (см. `deploy/docker-compose.yml` и `deploy/.env.example`).
+
+**Gateway:**
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `PORT` | `8080` | HTTP-порт |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / пусто | подключение к Redis |
+| `PROVIDERS_JSON` | gemini+openai+anthropic | базовые URL провайдеров; каждый ключ становится префиксом пути, например `/openai/v1/...` |
+| `GATEWAY_MODE` | `true` | включить аутентификацию по `X-Gateway-Key` |
+| `GATEWAY_KEY_HEADER` | `X-Gateway-Key` | заголовок с gateway-ключом |
+| `GATEWAY_FAIL_OPEN` | `false` | пропускать запросы, если не удалось проверить ключ |
+| `QUOTA_FAIL_OPEN` | `true` | пропускать запросы, если недоступен сервис квот |
+| `QUOTA_DAILY_LIMIT` | `20` | дневной лимит бесплатного тарифа |
+| `QUOTA_MONTHLY_LIMIT` | `40` | месячный лимит бесплатного тарифа |
+| `ALLOWED_IPS` / `ADMIN_TOKEN` | пусто | legacy IP-allowlist + токен `/admin/allow-ip` |
+| `LOG_LEVEL_GATEWAY` | `DEBUG` | уровень логов для `ru.mcs.aiproxy` |
+
+**Control-plane:**
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `PORT` | `8081` | HTTP-порт |
+| `DATABASE_URL` / `DATABASE_USER` / `DATABASE_PASSWORD` | локальная `ai_proxy`/`postgres`/`postgres` | подключение к Postgres |
+| `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` | подключение к Redis |
+| `ADMIN_EMAILS` | пусто | email'ы через запятую; эти пользователи становятся админами при регистрации |
+| `FREE_DAILY_LIMIT` / `FREE_MONTHLY_LIMIT` | `20` / `40` | лимиты бесплатного тарифа |
+| `PRO_DAILY_LIMIT` / `PRO_MONTHLY_LIMIT` | `-1` / `-1` | `-1` = безлимит |
+| `LOG_LEVEL_CONTROL_PLANE` | `DEBUG` | уровень логов для `ru.mcs.controlplane` |
+
+### Как считаются квоты
+
+- Учитываются только «модельные» пути (настраиваемый список `model-paths`: `/openai/v1/chat/completions`, `/openai/v1/responses`, `/anthropic/v1/messages`, `generateContent`). Стриминг считается одним запросом; запрос засчитывается в момент старта, поэтому неуспешные вызовы тоже тратят квоту.
+- Бесплатный тариф: блокировка при исчерпании **любого** лимита — 20/день **или** 40/мес. Возвращается `429` с заголовками `X-RateLimit-*`.
+- PRO (активируется по коду доступа) по умолчанию безлимитный.
+- После активации PRO gateway обновляет локальный кеш лимитов в течение ~60 секунд (TTL), поэтому изменение применяется не мгновенно.
+
+### Legacy IP-allowlist
+
+Если в запросе нет `X-Gateway-Key`, gateway переключается на старый IP-allowlist (`ALLOWED_IPS` + динамические записи через `POST /admin/allow-ip` с заголовком `X-Admin-Token`). При пустом allowlist и включённом gateway-режиме запросы без ключа получают `403`.
+
+## Запуск тестов
+
+### Юнит-тесты
 
 ```bash
-curl --request POST \
-  --url https://ai-proxy-pog5.onrender.com/admin/allow-ip \
-  --header 'X-Admin-Token: YOUR_ADMIN_TOKEN'
+./gradlew test
 ```
 
-**Добавить/изменить провайдеров** — делается не запросом к самому proxy, а через Render Dashboard → Environment → `PROVIDERS_JSON` → Save → Restart. Сам ai-proxy не имеет HTTP-эндпоинта для правки списка провайдеров — эта настройка читается только при старте процесса (см. `ProviderConfigLoader`), поэтому "на лету" здесь означает "без git commit и без пересборки образа", но не "без restart".
+### End-to-end smoke-тесты (контейнерные, кросс-платформенные)
 
-## Запуск с Docker
-
-### С помощью docker-compose
-
-Если у вас есть файл `docker-compose.yml` (я его уже создал для вас), вы можете запустить `ai-proxy` с помощью следующей команды:
+Одноразовый контейнер `ai-proxy-smoke-tests` запускается рядом со стеком, выполняет тесты, пишет результаты в общий volume и завершается.
 
 ```bash
-docker-compose up -d
+cd deploy
+docker compose --profile smoke run --rm smoke-tests
 ```
 
-Эта команда соберет образ (если он еще не собран) и запустит контейнер в фоновом режиме. Доступ к приложению будет по адресу `http://localhost:8080`.
-
-Чтобы остановить контейнер:
+Либо, чтобы оставить именованный контейнер для просмотра логов:
 
 ```bash
-docker-compose down
+docker compose --profile smoke up --force-recreate smoke-tests
 ```
 
-### С помощью docker run
+Что проверяет smoke-тест: здоровье сервисов; регистрацию админа и пользователя; логин; создание gateway-ключа; ошибки аутентификации (без ключа → 403, плохой ключ → 401, неизвестный провайдер → 404); квоту с `429` ровно на 21-м вызове; активацию PRO-кода (тариф становится безлимитным); наличие метрик Prometheus.
 
-Вы также можете запустить образ Docker напрямую, используя команду `docker run`. Замените `malexple/ai-proxy:latest` на актуальный тег образа.
+### Где смотреть результаты тестов
+
+1. **Логи контейнера** (доступны и после завершения контейнера):
+   ```bash
+   docker compose logs smoke-tests
+   ```
+2. **Файлы на хосте** — контейнер монтирует их в `deploy/test-results/`:
+   - `results.log` — человекочитаемый вывод (`PASS=n FAIL=m`),
+   - `results.xml` — JUnit XML, готов для CI (Jenkins/GitLab и т.п.).
+3. **Exit code**: `0` — всё прошло, `1` — есть падения. `docker compose run` пробрасывает код возврата, поэтому CI может опираться на него напрямую.
+
+## Ручное тестирование
+
+### Веб-интерфейс (control-plane)
+
+Открой http://localhost:8081, зарегистрируйся (email из `ADMIN_EMAILS`, например `admin@example.com` в дефолтном compose, станет админом), войди и используй:
+- `/dashboard` — создать gateway-ключ (plaintext `ak_...` показывается один раз), посмотреть использование, активировать код подписки;
+- `/admin` — генерировать коды доступа, менять тарифы пользователей.
+
+### REST API (control-plane)
 
 ```bash
-docker run -d -p 8080:8080 \
-  -e "PORT=8080" \
-  -e "PROVIDERS_JSON={\"gemini\":{\"baseUrl\":\"https://generativelanguage.googleapis.com\"},\"openai\":{\"baseUrl\":\"https://api.openai.com\"}}" \
-  --name ai-proxy malexple/ai-proxy:latest
+# регистрация (admin@example.com станет админом, т.к. он в ADMIN_EMAILS)
+curl -s -X POST http://localhost:8081/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"admin-pass-123"}'
+
+# логин, сохраняем сессионную куку
+curl -s -c cookies.txt -X POST http://localhost:8081/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"admin-pass-123"}'
+
+# создать gateway-ключ (plaintext вернётся один раз)
+curl -s -b cookies.txt -X POST http://localhost:8081/api/keys
+
+# текущее использование
+curl -s -b cookies.txt http://localhost:8081/api/usage
+
+# админ: сгенерировать PRO-код
+curl -s -b cookies.txt -X POST http://localhost:8081/api/admin/codes \
+  -H "Content-Type: application/json" -d '{"count":1,"tier":"PRO"}'
+
+# активировать код
+curl -s -b cookies.txt -X POST http://localhost:8081/api/subscriptions/activate \
+  -H "Content-Type: application/json" -d '{"code":"SUB-XXXX-XXXX-XXXX"}'
 ```
 
-В этой команде:
-- `-d` запускает контейнер в фоновом режиме.
-- `-p 8080:8080` сопоставляет порт 8080 вашего хоста с портом 8080 в контейнере.
-- `-e "PORT=8080"` устанавливает переменную среды `PORT` внутри контейнера.
-- `-e "PROVIDERS_JSON=..."` устанавливает переменную среды `PROVIDERS_JSON` для конфигурации прокси. Вам нужно будет заменить содержимое JSON на вашу актуальную конфигурацию.
-- `--name ai-proxy` присваивает имя контейнеру для удобства управления.
-- `malexple/ai-proxy:latest` - это имя и тег образа Docker для запуска.
+### Gateway (запросы к моделям)
 
-Чтобы остановить контейнер:
+Gateway-ключ передаётся в `X-Gateway-Key`, а провайдерский — в его обычном месте (`Authorization`, `x-api-key` или `?key=`):
 
 ```bash
-docker stop ai-proxy
+curl -s -X POST http://localhost:8080/openai/v1/chat/completions \
+  -H "X-Gateway-Key: ak_..." \
+  -H "Authorization: Bearer sk-..." \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
 ```
 
-Чтобы удалить контейнер:
+Ожидаемые статусы:
+
+| Сценарий | Результат |
+|---|---|
+| Валидный gateway-ключ, модельный вызов | запрос форвардится провайдеру |
+| Нет `X-Gateway-Key` | `403` (IP-allowlist) |
+| Невалидный gateway-ключ | `401` |
+| Неизвестный провайдер (например `/nosuch/v1/x`) | `404` |
+| Квота бесплатного тарифа исчерпана | `429` + заголовки `X-RateLimit-*` |
+
+### Наблюдаемость
 
 ```bash
-docker rm ai-proxy
+curl -s http://localhost:8080/actuator/prometheus | grep gateway_quota_exceeded_total
+curl -s http://localhost:8081/actuator/prometheus | grep http_server_requests_seconds_count
 ```
 
-## Слетят ли настройки при перезапуске
+Открой Grafana http://localhost:3000 (`admin`/`admin`) — дашборд **AI Proxy** показывает request rate, ошибки 5xx, латентность p95, превышения квоты и счётчики невалидных ключей.
 
-Здесь два разных типа настроек с разной судьбой:
+## Поиск логов приложений в Grafana (Loki)
 
-**Не слетят (переживают restart):**
+Promtail собирает stdout каждого контейнера (gateway, control-plane и инфраструктуры) и складывает в Loki. Чтобы искать логи в Grafana:
 
-- `PROVIDERS_JSON`, `ALLOWED_IPS`, `ADMIN_TOKEN` — это переменные окружения, они хранятся в Render Dashboard (или `.env`/docker run на VDI) отдельно от процесса контейнера. При restart/redeploy они читаются заново из того же места.
+1. Открой http://localhost:3000 (`admin`/`admin`).
+2. Перейди в **Explore** (иконка компаса) и выбери источник данных **Loki**.
+3. Используй браузер меток или пиши LogQL-запросы, например:
 
-**Слетят (не переживают restart):**
+```logql
+{service="gateway"}                        # все логи gateway
+{service="control-plane", level="ERROR"}   # только ошибки
+{service="gateway"} |= "Quota exceeded"    # полнотекстовый фильтр
+{service="gateway"} |= "Invalid gateway key"
+```
 
-- Динамически зарегистрированные через `/admin/allow-ip` IP-адреса — они живут **только в оперативной памяти процесса** (`ConcurrentHashMap` в `IpAllowlistService`). Если контейнер перезапускается (например, Render free-план "засыпает" при простое и поднимается заново, либо ты делаешь Manual Deploy), этот список полностью очищается, и тебе нужно зарегистрировать IP повторно через тот же `/admin/allow-ip`.
+Доступные метки: `service` (gateway, control-plane, postgres, redis, …), `container`, `level` (TRACE/DEBUG/INFO/WARN/ERROR), `project`.
 
-Это осознанный выбор: динамический список — временный и одноразовый по дизайну, чтобы не плодить персистентное хранилище (БД/файл) там, где хватает TTL в памяти. Если тебе важно, чтобы этот список переживал restart, единственный способ — переносить его в постоянное хранилище (файл на persistent disk или внешняя БД), но это уже усложнение архитектуры, которое стоит делать только если рестарты у тебя частые и это реально мешает.
+Замечания:
+- Логи появляются с небольшой задержкой — Promtail обновляет список контейнеров каждые 5 секунд.
+- Данные Loki хранятся в volume `loki-data`.
+- Логи можно запрашивать напрямую из Loki: `curl "http://localhost:3100/loki/api/v1/label/service/values"`.
+
+## Распределённый трейсинг (Tempo)
+
+Оба приложения запускаются с **OpenTelemetry Java agent** (подключается через `JAVA_TOOL_OPTIONS=-javaagent:...`), который автоматически инструментирует Spring WebFlux/MVC, WebClient, Lettuce и JDBC. Спаны экспортируются по OTLP в **Grafana Tempo**.
+
+Каждый запрос через **gateway** порождает один трейс с единым `trace_id`: входящий HTTP-спан, вызовы Redis и исходящий вызов к AI-провайдеру находятся в одном трейсе. Тот же `trace_id` попадает в логи приложений — логи и трейсы коррелируются.
+
+В трейсе запроса через gateway обычно следующие спаны (все под одним `trace_id`):
+- `POST /...` (server) — входящий запрос;
+- `gateway.key-resolve` — поиск gateway-ключа в Redis;
+- `gateway.quota-consume` — проверка квоты в Redis;
+- `POST` (client) — исходящий вызов к AI-провайдеру.
+
+### Просмотр трейсов
+
+1. Grafana → http://localhost:3000 (`admin`/`admin`).
+2. **Explore** → выбери источник **Tempo** и выполни TraceQL, например:
+
+```traceql
+{ service.name = "gateway" }
+{ service.name = "gateway" } && { http.route = "/openai/v1/chat/completions" }
+```
+
+Либо используй **Service graph** (Tempo → карта сервисов, работает через datasource `serviceMap`).
+
+### Корреляция логов и трейсов
+
+- В строке лога trace id в квадратных скобках: `[4a45b8b8f8adae16bd9ccaf30c4bb196]`.
+- Loki выставляет его меткой `trace_id`, поэтому логи одного трейса можно отфильтровать:
+  ```logql
+  {service="gateway", trace_id="4a45b8b8f8adae16bd9ccaf30c4bb196"}
+  ```
+- В Grafana Explore (Loki) у строки лога есть кнопка **View trace**; а в трейсе Tempo можно перейти к соответствующим логам (tracesToLogs → Loki).
+
+### Пробрасывание контекста
+
+Если клиент отправляет заголовок W3C `traceparent`, gateway продолжает этот трейс (trace id приходит от вызывающего); иначе gateway создаёт новый корневой трейс.
+
+> Примечание: в PowerShell на Windows `curl` — алиас на `Invoke-WebRequest`; используй `curl.exe`.

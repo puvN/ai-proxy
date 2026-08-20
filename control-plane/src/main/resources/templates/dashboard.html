@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Dashboard</title>
+</head>
+<body>
+<h1>Dashboard</h1>
+<p>Email: <span th:text="${email}"></span></p>
+<p>Tier: <span th:text="${tier}"></span></p>
+<p>Usage today: <span th:text="${dailyUsed}"></span> / <span th:text="${dailyLimit}"></span></p>
+<p>Usage this month: <span th:text="${monthlyUsed}"></span> / <span th:text="${monthlyLimit}"></span></p>
+
+<div th:if="${newKey}" style="border:1px solid green; padding:8px; margin:8px 0;">
+    New API key (shown once): <code th:text="${newKey}"></code>
+</div>
+<p th:if="${error}" th:text="${error}" style="color:red"></p>
+
+<h2>Create API key</h2>
+<form th:action="@{/keys}" method="post">
+    <button type="submit">Create key</button>
+</form>
+
+<h2>Your keys</h2>
+<ul>
+    <li th:each="k : ${keys}">
+        <code th:text="${k.keyPrefix}"></code>...
+        <span th:text="${k.createdAt}"></span>
+        <span th:if="${k.revokedAt}">(revoked)</span>
+        <form th:action="@{/keys/{id}/revoke(id=${k.id})}" method="post" style="display:inline">
+            <button type="submit" th:disabled="${k.revokedAt != null}">Revoke</button>
+        </form>
+    </li>
+</ul>
+
+<h2>Activate subscription</h2>
+<form th:action="@{/subscribe}" method="post">
+    <input type="text" name="code" placeholder="SUB-XXXX-XXXX-XXXX"/>
+    <button type="submit">Activate</button>
+</form>
+
+<p th:if="${admin}"><a th:href="@{/admin}">Admin</a></p>
+<form th:action="@{/logout}" method="post">
+    <button type="submit">Logout</button>
+</form>
+</body>
+</html>

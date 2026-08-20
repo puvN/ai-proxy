@@ -1,9 +1,13 @@
 package ru.mcs.aiproxy.service;
 
+import java.net.URI;
+
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -15,16 +19,11 @@ import ru.mcs.aiproxy.model.ProxyRequest;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class ProxyService {
     private final WebClient webClient;
     private final UrlBuilderService urlBuilderService;
     private final AppProperties appProperties;
-
-    public ProxyService(WebClient webClient, UrlBuilderService urlBuilderService, AppProperties appProperties) {
-        this.webClient = webClient;
-        this.urlBuilderService = urlBuilderService;
-        this.appProperties = appProperties;
-    }
 
     public Mono<ServerResponse> forward(ProxyRequest request) {
         var uri = urlBuilderService.build(request);
