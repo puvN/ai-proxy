@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Admin</title>
+</head>
+<body>
+<h1>Admin</h1>
+<p><a th:href="@{/dashboard}">Back to dashboard</a></p>
+
+<h2>Generate access codes</h2>
+<form th:action="@{/admin/codes}" method="post">
+    <label>Count <input type="number" name="count" value="1" min="1" max="1000"/></label>
+    <label>Tier
+        <select name="tier">
+            <option value="PRO">PRO</option>
+            <option value="FREE">FREE</option>
+        </select>
+    </label>
+    <label>Expires at (ISO, optional) <input type="text" name="expiresAt"/></label>
+    <button type="submit">Generate</button>
+</form>
+
+<h2>Access codes</h2>
+<table border="1">
+    <tr><th>Code</th><th>Tier</th><th>Status</th><th>Claimed by</th><th>Expires</th></tr>
+    <tr th:each="c : ${codes}">
+        <td th:text="${c.code}"></td>
+        <td th:text="${c.tier}"></td>
+        <td th:text="${c.status}"></td>
+        <td th:text="${c.claimedBy}"></td>
+        <td th:text="${c.expiresAt}"></td>
+    </tr>
+</table>
+
+<h2>Users</h2>
+<table border="1">
+    <tr><th>ID</th><th>Email</th><th>Tier</th><th>Admin</th><th>Change tier</th></tr>
+    <tr th:each="u : ${users}">
+        <td th:text="${u.id}"></td>
+        <td th:text="${u.email}"></td>
+        <td th:text="${u.tier}"></td>
+        <td th:text="${u.admin}"></td>
+        <td>
+            <form th:action="@{/admin/users/{id}/tier(id=${u.id})}" method="post">
+                <select name="tier">
+                    <option value="FREE" th:selected="${u.tier.name() == 'FREE'}">FREE</option>
+                    <option value="PRO" th:selected="${u.tier.name() == 'PRO'}">PRO</option>
+                </select>
+                <button type="submit">Save</button>
+            </form>
+        </td>
+    </tr>
+</table>
+</body>
+</html>

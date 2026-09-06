@@ -1,5 +1,9 @@
 package ru.mcs.aiproxy.handler;
 
+import java.net.InetSocketAddress;
+import java.time.Instant;
+
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -11,15 +15,11 @@ import ru.mcs.aiproxy.service.IpAllowlistService;
 
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class AdminHandler {
     private static final String ADMIN_TOKEN_HEADER = "X-Admin-Token";
     private final AppProperties appProperties;
     private final IpAllowlistService ipAllowlistService;
-
-    public AdminHandler(AppProperties appProperties, IpAllowlistService ipAllowlistService) {
-        this.appProperties = appProperties;
-        this.ipAllowlistService = ipAllowlistService;
-    }
 
     public Mono<ServerResponse> allowCurrentIp(ServerRequest request) {
         var configuredToken = appProperties.getSecurity().getAdminToken();

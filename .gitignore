@@ -39,5 +39,8 @@ bin/
 ### VS Code ###
 .vscode/
 
+### Test artifacts ###
+deploy/test-results/
+
 ### Mac OS ###
 .DS_Store

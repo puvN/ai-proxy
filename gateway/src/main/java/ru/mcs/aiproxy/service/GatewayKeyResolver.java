@@ -5,6 +5,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -15,18 +17,18 @@ import ru.mcs.aiproxy.config.AppProperties;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class GatewayKeyResolver {
     private static final String KEY_PREFIX = "gateway:key:";
     private static final String INVALID = "<invalid>";
 
     private final ReactiveStringRedisTemplate redis;
     private final AppProperties appProperties;
-    private final TtlCache<String, String> cache;
+    private TtlCache<String, String> cache = new TtlCache<>(0);
 
-    public GatewayKeyResolver(ReactiveStringRedisTemplate redis, AppProperties appProperties) {
-        this.redis = redis;
-        this.appProperties = appProperties;
-        this.cache = new TtlCache<>(appProperties.getGateway().getCacheTtlSeconds() * 1000);
+    @PostConstruct
+    void init() {
+        cache = new TtlCache<>(appProperties.getGateway().getCacheTtlSeconds() * 1000);
     }
 
     public Mono<String> resolveUserId(String rawKey) {

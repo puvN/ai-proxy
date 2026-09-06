@@ -8,6 +8,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -22,6 +24,7 @@ import ru.mcs.aiproxy.model.UserLimits;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class QuotaService {
     private static final String LIMITS_PREFIX = "gateway:user:";
     private static final String LIMITS_SUFFIX = ":limits";
@@ -39,13 +42,11 @@ public class QuotaService {
     private final ReactiveStringRedisTemplate redis;
     private final AppProperties appProperties;
     private final ObjectMapper objectMapper;
-    private final TtlCache<String, UserLimits> limitsCache;
+    private TtlCache<String, UserLimits> limitsCache = new TtlCache<>(0);
 
-    public QuotaService(ReactiveStringRedisTemplate redis, AppProperties appProperties, ObjectMapper objectMapper) {
-        this.redis = redis;
-        this.appProperties = appProperties;
-        this.objectMapper = objectMapper;
-        this.limitsCache = new TtlCache<>(appProperties.getQuota().getLimitsCacheTtlSeconds() * 1000);
+    @PostConstruct
+    void init() {
+        limitsCache = new TtlCache<>(appProperties.getQuota().getLimitsCacheTtlSeconds() * 1000);
     }
 
     public boolean isModelCall(String path) {
